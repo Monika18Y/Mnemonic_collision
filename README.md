@@ -200,7 +200,6 @@ TRON_API_URL = "https://api.trongrid.io/wallet/getaccount"  # API端点
 
 如果您有任何问题或建议，请联系：
 - 邮箱：monika18dol@gmail.com
-- Telegram：@jiutong9999
 
 ## 💰 支持项目
 
