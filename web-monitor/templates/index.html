@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>TRON私钥碰撞监控</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+            backdrop-filter: blur(10px);
+            background: rgba(255,255,255,0.95);
+        }
+        
+        .status-online {
+            color: #28a745;
+        }
+        
+        .status-offline {
+            color: #dc3545;
+        }
+        
+        .metric-card {
+            transition: transform 0.3s ease;
+        }
+        
+        .metric-card:hover {
+            transform: translateY(-5px);
+        }
+        
+        .log-container {
+            max-height: 400px;
+            overflow-y: auto;
+            background: #1a1a1a;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            padding: 15px;
+            border-radius: 10px;
+        }
+        
+        .pulse {
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0% { opacity: 1; }
+            50% { opacity: 0.5; }
+            100% { opacity: 1; }
+        }
+        
+        .navbar {
+            background: rgba(0,0,0,0.1) !important;
+            backdrop-filter: blur(10px);
+        }
+        
+        .btn-control {
+            margin: 5px;
+            border-radius: 25px;
+            padding: 10px 20px;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-control:hover {
+            transform: scale(1.05);
+        }
+        
+        .found-address {
+            background: linear-gradient(45deg, #28a745, #20c997);
+            color: white;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 10px 0;
+            animation: glow 2s infinite alternate;
+        }
+        
+        @keyframes glow {
+            from { box-shadow: 0 0 20px rgba(40, 167, 69, 0.5); }
+            to { box-shadow: 0 0 30px rgba(40, 167, 69, 0.8); }
+        }
+        
+        .progress-animated {
+            background: linear-gradient(45deg, #007bff, #6f42c1);
+            background-size: 200% 200%;
+            animation: gradient 3s ease infinite;
+        }
+        
+        @keyframes gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar navbar-expand-lg navbar-dark">
+        <div class="container">
+            <a class="navbar-brand" href="#">
+                <i class="fas fa-coins"></i> TRON私钥碰撞监控
+            </a>
+            <div class="navbar-nav ms-auto">
+                <span class="navbar-text">
+                    <i class="fas fa-circle pulse" id="connection-status"></i>
+                    <span id="connection-text">连接中...</span>
+                </span>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <!-- 服务状态卡片 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card metric-card">
+                    <div class="card-header bg-primary text-white">
+                        <h5><i class="fas fa-server"></i> 服务状态</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h4 id="service-status" class="mb-1">
+                                    <i class="fas fa-circle"></i> 检查中...
+                                </h4>
+                                <p class="text-muted mb-0">TRON碰撞服务</p>
+                            </div>
+                            <div class="text-end">
+                                <button class="btn btn-warning btn-control" onclick="controlService('restart')">
+                                    <i class="fas fa-redo"></i> 重启
+                                </button>
+                                <button class="btn btn-info btn-control btn-test-api" onclick="testAPI()">
+                                    <i class="fas fa-vial"></i> 测试API
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card metric-card">
+                    <div class="card-header bg-info text-white">
+                        <h5><i class="fas fa-chart-line"></i> 碰撞统计</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row text-center">
+                            <div class="col-4">
+                                <h4 id="total-checked" class="text-primary">0</h4>
+                                <small class="text-muted">总检查数</small>
+                            </div>
+                            <div class="col-4">
+                                <h4 id="found-count" class="text-success">0</h4>
+                                <small class="text-muted">发现地址</small>
+                            </div>
+                            <div class="col-4">
+                                <h4 id="check-speed" class="text-warning">0</h4>
+                                <small class="text-muted">检查/秒</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 系统资源监控 -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-microchip fa-2x text-primary mb-2"></i>
+                        <h5>CPU使用率</h5>
+                        <div class="progress mb-2">
+                            <div id="cpu-progress" class="progress-bar progress-animated" style="width: 0%"></div>
+                        </div>
+                        <span id="cpu-percent">0%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-memory fa-2x text-success mb-2"></i>
+                        <h5>内存使用率</h5>
+                        <div class="progress mb-2">
+                            <div id="memory-progress" class="progress-bar bg-success" style="width: 0%"></div>
+                        </div>
+                        <span id="memory-percent">0%</span>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-hdd fa-2x text-warning mb-2"></i>
+                        <h5>磁盘使用率</h5>
+                        <div class="progress mb-2">
+                            <div id="disk-progress" class="progress-bar bg-warning" style="width: 0%"></div>
+                        </div>
+                        <span id="disk-percent">0%</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 发现的地址 -->
+        <div class="row mb-4" id="found-addresses-section" style="display: none;">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header bg-success text-white">
+                        <h5><i class="fas fa-trophy"></i> 🎉 发现有资产的地址！</h5>
+                        <small><i class="fas fa-shield-alt"></i> 私钥已安全保护，不在网络传输</small>
+                    </div>
+                    <div class="card-body" id="found-addresses">
+                        <!-- 动态生成 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 实时日志 -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5><i class="fas fa-file-alt"></i> 实时日志</h5>
+                        <button class="btn btn-sm btn-outline-primary" onclick="refreshLogs()">
+                            <i class="fas fa-sync-alt"></i> 刷新
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div id="logs" class="log-container">
+                            <div class="text-center">
+                                <i class="fas fa-spinner fa-spin"></i> 加载日志中...
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 运行时间和概率信息 -->
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-clock fa-2x text-info mb-2"></i>
+                        <h5>运行时间</h5>
+                        <h4 id="runtime" class="text-info">00:00:00</h4>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card metric-card">
+                    <div class="card-body text-center">
+                        <i class="fas fa-percentage fa-2x text-secondary mb-2"></i>
+                        <h5>成功概率</h5>
+                        <small class="text-muted">0.0000000000000000000000000000000000000000000000000000000000000000000376%</small>
+                        <p class="mt-2 text-warning">
+                            <i class="fas fa-info-circle"></i> 祝你好运！
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.1.3/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script>
+        // WebSocket连接 - 明确指定连接地址
+        const socket = io(window.location.origin, {
+            transports: ['websocket', 'polling'],
+            upgrade: true,
+            rememberUpgrade: true
+        });
+        
+        // 连接状态
+        socket.on('connect', function() {
+            document.getElementById('connection-status').className = 'fas fa-circle pulse status-online';
+            document.getElementById('connection-text').textContent = '已连接';
+        });
+        
+        socket.on('disconnect', function() {
+            document.getElementById('connection-status').className = 'fas fa-circle pulse status-offline';
+            document.getElementById('connection-text').textContent = '连接断开';
+        });
+        
+        // 接收状态更新
+        socket.on('status_update', function(data) {
+            updateStatus(data);
+        });
+        
+        // 更新状态显示
+        function updateStatus(data) {
+            // 服务状态
+            const serviceStatus = document.getElementById('service-status');
+            if (data.service.active) {
+                serviceStatus.innerHTML = '<i class="fas fa-circle status-online"></i> 运行中';
+                serviceStatus.className = 'mb-1 text-success';
+            } else {
+                serviceStatus.innerHTML = '<i class="fas fa-circle status-offline"></i> 已停止';
+                serviceStatus.className = 'mb-1 text-danger';
+            }
+            
+            // 统计信息
+            if (data.statistics) {
+                document.getElementById('total-checked').textContent = data.statistics.total_checked || 0;
+                document.getElementById('found-count').textContent = data.statistics.found_count || 0;
+                document.getElementById('check-speed').textContent = (data.statistics.speed_per_second || 0).toFixed(2);
+                
+                // 运行时间
+                const runtime = data.statistics.runtime_seconds || 0;
+                const hours = Math.floor(runtime / 3600);
+                const minutes = Math.floor((runtime % 3600) / 60);
+                const seconds = Math.floor(runtime % 60);
+                document.getElementById('runtime').textContent = 
+                    `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+                
+                // 发现的地址
+                if (data.statistics.found_addresses && data.statistics.found_addresses.length > 0) {
+                    showFoundAddresses(data.statistics.found_addresses);
+                }
+            }
+            
+            // 系统资源
+            if (data.system) {
+                updateSystemMetrics(data.system);
+            }
+        }
+        
+        // 更新系统指标
+        function updateSystemMetrics(system) {
+            if (system.cpu_percent !== undefined) {
+                document.getElementById('cpu-progress').style.width = system.cpu_percent + '%';
+                document.getElementById('cpu-percent').textContent = system.cpu_percent.toFixed(1) + '%';
+            }
+            
+            if (system.memory && system.memory.percent !== undefined) {
+                document.getElementById('memory-progress').style.width = system.memory.percent + '%';
+                document.getElementById('memory-percent').textContent = system.memory.percent.toFixed(1) + '%';
+            }
+            
+            if (system.disk && system.disk.percent !== undefined) {
+                document.getElementById('disk-progress').style.width = system.disk.percent + '%';
+                document.getElementById('disk-percent').textContent = system.disk.percent.toFixed(1) + '%';
+            }
+        }
+        
+        // 显示发现的地址（安全模式：不显示私钥）
+        function showFoundAddresses(addresses) {
+            const section = document.getElementById('found-addresses-section');
+            const container = document.getElementById('found-addresses');
+            
+            section.style.display = 'block';
+            container.innerHTML = '';
+            
+            addresses.forEach(addr => {
+                const div = document.createElement('div');
+                div.className = 'found-address';
+                div.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6><i class="fas fa-trophy"></i> 发现 #${addr.id}</h6>
+                        <small class="text-muted">${addr.found_time}</small>
+                    </div>
+                    <h6><i class="fas fa-wallet"></i> TRON地址</h6>
+                    <code class="text-info">${addr.address}</code>
+                    <h6 class="mt-3"><i class="fas fa-coins"></i> 余额</h6>
+                    <code class="text-success">${addr.balance}</code>
+                    <div class="mt-3 p-2 bg-warning bg-opacity-10 rounded">
+                        <h6><i class="fas fa-shield-alt text-warning"></i> 私钥安全保护</h6>
+                        <small class="text-muted">
+                            🔐 私钥已安全保存在服务器文件中：<br>
+                            <code>/opt/tron-collision/non_zero_addresses.txt</code><br>
+                            请通过SSH登录服务器查看完整信息
+                        </small>
+                    </div>
+                `;
+                container.appendChild(div);
+            });
+        }
+        
+        // 服务控制
+        function controlService(action) {
+            fetch(`/api/control/${action}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    const contentType = response.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        throw new Error('服务器返回了非JSON响应，可能服务未正确启动');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.success) {
+                        showAlert('success', `服务${action}成功！`);
+                    } else {
+                        showAlert('danger', `服务${action}失败：${data.message}`);
+                    }
+                    // 延迟刷新状态
+                    setTimeout(() => {
+                        socket.emit('request_update');
+                    }, 2000);
+                })
+                .catch(error => {
+                    console.error('Control API Error:', error);
+                    showAlert('danger', `操作失败：${error.message}`);
+                });
+        }
+        
+        // 刷新日志
+        function refreshLogs() {
+            fetch('/api/logs')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    const contentType = response.headers.get('content-type');
+                    if (!contentType || !contentType.includes('application/json')) {
+                        throw new Error('服务器返回了非JSON响应，可能Web服务未正确启动');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    const logsContainer = document.getElementById('logs');
+                    logsContainer.innerHTML = '';
+                    
+                    if (data.logs && data.logs.length > 0) {
+                        data.logs.forEach(log => {
+                            const line = document.createElement('div');
+                            line.textContent = log.trim();
+                            logsContainer.appendChild(line);
+                        });
+                        logsContainer.scrollTop = logsContainer.scrollHeight;
+                    } else {
+                        logsContainer.innerHTML = '<div class="text-center text-muted">暂无日志</div>';
+                    }
+                })
+                .catch(error => {
+                    console.error('Logs API Error:', error);
+                    document.getElementById('logs').innerHTML = `<div class="text-center text-danger">加载日志失败：${error.message}</div>`;
+                });
+        }
+        
+        // 显示提示
+        function showAlert(type, message) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show position-fixed`;
+            alertDiv.style.top = '20px';
+            alertDiv.style.right = '20px';
+            alertDiv.style.zIndex = '9999';
+            alertDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.body.appendChild(alertDiv);
+            
+            // 自动消失
+            setTimeout(() => {
+                if (alertDiv.parentNode) {
+                    alertDiv.parentNode.removeChild(alertDiv);
+                }
+            }, 5000);
+        }
+        
+        // API连接测试
+        function testAPI() {
+            const testBtn = document.querySelector('.btn-test-api');
+            if (testBtn) {
+                testBtn.disabled = true;
+                testBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 测试中...';
+            }
+
+            fetch('/api/test')
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    showAlert('success', `API测试成功！${data.message}`);
+                    console.log('API Test Result:', data);
+                })
+                .catch(error => {
+                    showAlert('danger', `API测试失败：${error.message}`);
+                    console.error('API Test Error:', error);
+                })
+                .finally(() => {
+                    if (testBtn) {
+                        testBtn.disabled = false;
+                        testBtn.innerHTML = '<i class="fas fa-vial"></i> 测试API';
+                    }
+                });
+        }
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            // API连接测试
+            testAPI();
+            
+            // 请求初始状态
+            socket.emit('request_update');
+            
+            // 加载日志
+            refreshLogs();
+            
+            // 定时刷新日志
+            setInterval(refreshLogs, 10000); // 每10秒刷新一次日志
+        });
+    </script>
+</body>
+</html>
